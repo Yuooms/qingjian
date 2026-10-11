@@ -22,6 +22,7 @@ use std::path::Path;
 
 use qingjian_core::FuzzyRules;
 use qingjian_predict::PredictConfig;
+use qingjian_search::SearchConfig;
 use serde::{Deserialize, Serialize};
 use toml_edit::DocumentMut;
 
@@ -83,6 +84,9 @@ pub struct Config {
 
     /// 云联想。
     pub predict: PredictConfig,
+
+    /// 搜索联想（搜索建议接口的候选词）。
+    pub search: SearchConfig,
 
     /// 悬浮状态条（桌面上常驻、可拖动的中 / 英浮窗）。
     pub status_bar: StatusBarConfig,
@@ -356,6 +360,23 @@ lookahead = 32
 slots = 2
 # 组句中除了词候选还要不要整句补全（preedit 右侧，Tab 接受）
 sentence = true
+
+[search]
+# 搜索联想：输入拼音时把拼音字母发给搜索建议接口，把搜到、且与所敲拼音对得上的中文词补进候选末尾，
+# 方便输入词库中没有的词（人名、地名、新词）。默认关闭。只发拼音字母、不发上下文，密码框里绝不发送。
+enabled = false
+# 搜索建议接口（OpenSearch Suggestions JSON）；换成别的兼容接口也一样用
+endpoint = "https://api.bing.com/osjson.aspx"
+# 市场（mkt）与界面语言（setlang）
+market = "zh-CN"
+setlang = "zh-Hans"
+# 单次请求超时（毫秒）、停止敲键多久后才真正发请求（毫秒）
+timeout_ms = 1500
+debounce_ms = 200
+# 联想词补进候选窗口第一页末尾几格（比如 2 就是 8、9 两格）；0 表示不要词，连请求都不发
+slots = 2
+# 少于这么多个字母不发请求
+min_letters = 2
 
 [status_bar]
 # 桌面上常驻、可拖动的悬浮状态条（Windows）：「中 / 英」格点一下切换模式（开着双拼时还显示方案名）、「，。」格切全角 / 半角标点、齿轮打开设置。
