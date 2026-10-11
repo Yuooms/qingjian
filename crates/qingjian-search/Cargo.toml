@@ -1,0 +1,20 @@
+[package]
+name = "qingjian-search"
+description = "搜索联想：搜索建议接口的候选词来源，补词库中没有的词"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qingjian-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# 直接 GET 一个 JSON 接口，不走 async-openai；system-proxy 让系统代理下的请求也通
+reqwest = { workspace = true, features = ["native-tls", "system-proxy"] }
