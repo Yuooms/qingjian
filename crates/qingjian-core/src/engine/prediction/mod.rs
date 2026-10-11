@@ -9,6 +9,7 @@
 mod cloud_word;
 mod fuzzy;
 mod kind;
+mod multi_predictor;
 mod policy;
 mod predictor;
 mod question;
@@ -20,6 +21,7 @@ mod surrounding_text;
 pub use cloud_word::CloudWord;
 pub use fuzzy::{mismatch_count, tolerance};
 pub use kind::PredictionKind;
+pub use multi_predictor::MultiPredictor;
 pub use policy::PredictionPolicy;
 pub use predictor::{NoPredictor, Predictor};
 pub use question::restates_question;
