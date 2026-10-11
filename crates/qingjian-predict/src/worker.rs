@@ -27,6 +27,9 @@ pub struct Worker {
     /// 防抖窗口。
     debounce: Duration,
 
+    /// 出错时也回一条空结果：组合联想里要它把这一批收齐，早点结束等待。
+    reply_empty_on_error: bool,
+
     /// 结果缓存。
     cache: PredictionCache,
 }
@@ -40,12 +43,14 @@ impl Worker {
         responses: Sender<Prediction>,
         client: ChatClient,
         debounce: Duration,
+        reply_empty_on_error: bool,
     ) -> Self {
         Self {
             requests,
             responses,
             client,
             debounce,
+            reply_empty_on_error,
             cache: PredictionCache::with_capacity(CACHE_CAPACITY),
         }
     }
@@ -84,6 +89,15 @@ impl Worker {
                 }
                 Err(error) => {
                     tracing::warn!(sequence = request.sequence, %error, "联想失败");
+                    if self.reply_empty_on_error {
+                        self.reply(
+                            request.sequence,
+                            Reply {
+                                words: Vec::new(),
+                                sentence: None,
+                            },
+                        );
+                    }
                 }
             }
         }

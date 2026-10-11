@@ -22,7 +22,18 @@ pub struct CloudPredictor {
 
 impl CloudPredictor {
     /// 没有密钥直接报错，让壳退回 [`qingjian_core::NoPredictor`] 并记日志。
+    /// 出错时不回结果，等待由壳自己的超时兜底。
     pub fn new(config: &PredictConfig) -> Result<Self, PredictError> {
+        Self::build(config, false)
+    }
+
+    /// 出错时也回一条空结果：与别的联想源组合（[`qingjian_core::MultiPredictor`]）时用它，
+    /// 好让这一批早点收齐、不把快的源拖到截止时间。单独的云联想仍用 [`Self::new`]。
+    pub fn new_reliable(config: &PredictConfig) -> Result<Self, PredictError> {
+        Self::build(config, true)
+    }
+
+    fn build(config: &PredictConfig, reply_empty_on_error: bool) -> Result<Self, PredictError> {
         let api_key = config
             .resolve_api_key()
             .ok_or_else(|| PredictError::MissingApiKey(config.api_key_env.clone()))?;
@@ -34,6 +45,7 @@ impl CloudPredictor {
             response_tx,
             client,
             Duration::from_millis(config.debounce_ms),
+            reply_empty_on_error,
         );
         std::thread::Builder::new()
             .name("qingjian-predict".to_owned())
