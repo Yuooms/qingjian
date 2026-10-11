@@ -3,8 +3,8 @@
 use qingjian_predict::{ConnectionTest, PredictConfig};
 use windows_reactor::*;
 
-use crate::panel::cloud_status::CloudStatus;
 use crate::panel::controls::{field, labeled, note, page};
+use crate::panel::probe_status::ProbeStatus;
 use crate::panel::{Message, Settings};
 
 /// 后台跑一次连通性测试，轮询到有结果或被取消。
@@ -35,10 +35,10 @@ pub(crate) fn run_test(
 pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
     let p = &settings.config.predict;
     let status = match &settings.cloud_status {
-        CloudStatus::Idle => String::new(),
-        CloudStatus::Testing => "测试中…".to_owned(),
-        CloudStatus::Ok(message) => message.clone(),
-        CloudStatus::Failed(message) => format!("失败：{message}"),
+        ProbeStatus::Idle => String::new(),
+        ProbeStatus::Testing => "测试中…".to_owned(),
+        ProbeStatus::Ok(message) => message.clone(),
+        ProbeStatus::Failed(message) => format!("失败：{message}"),
     };
     let rows = [
         field(

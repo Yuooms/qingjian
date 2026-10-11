@@ -58,6 +58,24 @@ pub(crate) enum Message {
     TestConnection,
     CloudTestDone(Result<String, String>),
 
+    // 搜索联想页
+    /// 搜索联想总开关（`[search] enabled`，缺省关）。
+    SearchEnabled(bool),
+    /// 联想词最多补进第一页末尾几格。
+    SearchSlots(Option<f64>),
+    /// 搜索建议接口地址。
+    SearchEndpoint(String),
+    /// 市场（`mkt`）。
+    SearchMarket(String),
+    /// 单次请求超时（毫秒）。
+    SearchTimeout(Option<f64>),
+    /// 停键多久后才发请求（毫秒）。
+    SearchDebounce(Option<f64>),
+    /// 少于这么多个字母不发请求。
+    SearchMinLetters(Option<f64>),
+    TestSearch,
+    SearchTestDone(Result<String, String>),
+
     // 快捷键页
     PageKeys(Option<usize>),
     ModeExpression(Option<usize>),

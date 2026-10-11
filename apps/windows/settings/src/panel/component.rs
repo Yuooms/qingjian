@@ -7,10 +7,10 @@ use qingjian_platform::{
 use qingjian_render::ThemeLibrary;
 use windows_reactor::*;
 
-use super::cloud_status::CloudStatus;
 use super::controls::{export_logs, log_dir, open_in_editor, open_with_explorer};
 use super::notice::Notice;
-use super::pages::{about, aux_code, cloud, dictionaries, general, shortcut};
+use super::pages::{about, aux_code, cloud, dictionaries, general, search, shortcut};
+use super::probe_status::ProbeStatus;
 use super::recorder::Recorder;
 use super::{Message, Settings};
 
@@ -26,7 +26,8 @@ impl Component for Settings {
             config,
             path,
             page: "general".to_string(),
-            cloud_status: CloudStatus::Idle,
+            cloud_status: ProbeStatus::Idle,
+            search_status: ProbeStatus::Idle,
             recorder: Recorder::Idle,
             record_box: ElementRef::new(),
             notice: Notice::default(),
@@ -164,10 +165,10 @@ impl Component for Settings {
             }
             Message::CloudSentence(on) => self.save("predict", "sentence", on),
             Message::TestConnection => {
-                if matches!(self.cloud_status, CloudStatus::Testing) {
+                if matches!(self.cloud_status, ProbeStatus::Testing) {
                     return;
                 }
-                self.cloud_status = CloudStatus::Testing;
+                self.cloud_status = ProbeStatus::Testing;
                 let config = self.config.predict.clone();
                 context.spawn_background(move |cancel| {
                     Message::CloudTestDone(cloud::run_test(&config, &cancel))
@@ -175,8 +176,45 @@ impl Component for Settings {
             }
             Message::CloudTestDone(result) => {
                 self.cloud_status = match result {
-                    Ok(message) => CloudStatus::Ok(message),
-                    Err(message) => CloudStatus::Failed(message),
+                    Ok(message) => ProbeStatus::Ok(message),
+                    Err(message) => ProbeStatus::Failed(message),
+                };
+            }
+
+            // 搜索联想页
+            Message::SearchEnabled(on) => self.save("search", "enabled", on),
+            Message::SearchSlots(Some(value)) => {
+                let slots = (value.round() as i64).clamp(0, 9);
+                self.save("search", "slots", slots);
+            }
+            Message::SearchEndpoint(value) => self.save("search", "endpoint", value),
+            Message::SearchMarket(value) => self.save("search", "market", value),
+            Message::SearchTimeout(Some(value)) => {
+                let ms = (value.round() as i64).clamp(200, 10_000);
+                self.save("search", "timeout_ms", ms);
+            }
+            Message::SearchDebounce(Some(value)) => {
+                let ms = (value.round() as i64).clamp(0, 2_000);
+                self.save("search", "debounce_ms", ms);
+            }
+            Message::SearchMinLetters(Some(value)) => {
+                let letters = (value.round() as i64).clamp(1, 8);
+                self.save("search", "min_letters", letters);
+            }
+            Message::TestSearch => {
+                if matches!(self.search_status, ProbeStatus::Testing) {
+                    return;
+                }
+                self.search_status = ProbeStatus::Testing;
+                let config = self.config.search.clone();
+                context.spawn_background(move |cancel| {
+                    Message::SearchTestDone(search::run_test(&config, &cancel))
+                });
+            }
+            Message::SearchTestDone(result) => {
+                self.search_status = match result {
+                    Ok(message) => ProbeStatus::Ok(message),
+                    Err(message) => ProbeStatus::Failed(message),
                 };
             }
 
@@ -358,6 +396,7 @@ impl Component for Settings {
             item("candidates", "候选窗口", Symbol::View),
             item("shortcut", "快捷键", Symbol::Keyboard),
             item("cloud", "云服务", Symbol::World),
+            item("search", "搜索联想", Symbol::Find),
             item("fuzzy", "模糊音", Symbol::Audio),
             item("dictionaries", "词库", Symbol::Library),
             item("aux_code", "辅码", Symbol::Character),
