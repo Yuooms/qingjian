@@ -16,6 +16,7 @@ macOS 版与 Windows 版均为测试版，两个平台功能相同，按键按�
 - 查某个键的作用：[按键与快捷键](getting-started/keys.md)，两个平台并列。
 - 候选旁的译词、橙色的含义：[译词与生词](learning/translation.md)。
 - 联网补全整句、答字、翻译选中文字：[云联想](cloud/index.md)，缺省关闭，需自行填写 AI 服务商。
+- 只补词库中没有的词、不发送输入上下文：[搜索联想](cloud/search-suggestions.md)，缺省关闭，暂仅 Windows。
 - 青简在本机保存了哪些文件：[数据与日志](help/data-and-logs.md)。
 
 ## 三条原则

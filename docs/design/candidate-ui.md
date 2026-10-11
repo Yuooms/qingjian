@@ -245,6 +245,27 @@ Core `shortcut` 模块，不查词库、由输入直接算出，`CandidateKind::
 云端词比格数多只取前几条；与本地候选同文的不要（本地已经能给）；云端词只在第一页，翻页后全是本地候选。`slots = 0` 不要云端词、只要整句补全。
 问字模式没有本地候选，答案从第 1 格起排满一页。
 
+### 搜索联想（默认关闭，仅 Windows）
+
+云联想之外的第二个网络源（`crates/qingjian-search` 的 `BingPredictor`）：只发**拼音字母**、不带上下文，
+向搜索建议接口（缺省 Bing 的 `api.bing.com/osjson.aspx`，无需密钥）要这个词的联想，取回的中文词按同一套
+「第一页末尾几格」规则补进候选（`[search] slots`，缺省 2），标记沿用云端词的云朵（`CandidateKind::Cloud`，
+不为它新开一种候选来源，渲染器那层不用动）。它解决的是词库里没有的人名、地名、新词。
+
+与云联想的差别全在「哪些建议能用」这一步（`filter::to_cloud_words`）：接口返回的是**搜索热词**，
+`yisitalu` 会给「伊斯塔露」「伊斯塔露是谁」「伊斯塔露cos」，只留整条都是汉字、字数又正好等于音节数的；
+音节直接取用户敲的那次切分（接口不给读音），Core 的 `validate_cloud_words` 才认，上屏才能按音节消耗拼音、记成用户词。
+
+**什么时候发**（`worker::Worker::wants`）：组句中、不是简拼（Core 对简拼置 `max_items = 0`）、字母数够 `min_letters`、
+且 `parser::is_fully_segmentable`——最后这条顺手挡住简拼 `fhyq`、形码编码 `ggll` 与末尾还没打完的 `kaif`。
+停键 200 毫秒后发，超时（缺省 1500 毫秒）即丢；结果进 LRU 缓存（键 = 切分 + 市场，不含序号），空结果不进缓存。
+**任何失败路径都回一条空结果**，这是给组合器看的：不回就没人知道这一路已经放弃。
+
+**与云联想同时开**：`Engine` 只有一个 `predictor` 槽位，两个源靠 Core 的 `MultiPredictor` 合成一个——
+请求同时下发，按序号攒批，收齐或超过截止时间后按源顺序拼接、按文本去重，搜索的词因此排在云的词前面。
+截止时间是兜底（某源线程没了时不能一直等）。Windows 的装配在 `dispatch/reload::attach_predictors`，
+组合时云联想改用 `CloudPredictor::new_reliable`（失败回空），否则 Bing 先到了也要陪它等到截止。
+
 ### 问字模式（云联想的一部分，问字键 `u` 或 `?` 开头）
 
 缓冲区为空时敲问字键（缺省 `u`）或 `?` 进问字模式，接着用拼音敲问题：`usangemushishenmezi`（三个木是什么字）、`umumumu`（报部件）、
