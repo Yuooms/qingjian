@@ -16,6 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `crates/qingjian-translate`：释义表 `Glossary`、词汇等级表 `LevelTable`。
 - `crates/qingjian-learning`：用户侧落盘：词频 / 用户词 / 个人 n-gram / 敲错表（`FrequencyLearner`）、输入日志（`InputLog`）、输入统计（`UsageStats`）、词汇记录（`VocabularyBook`）。
 - `crates/qingjian-predict`：云联想 `CloudPredictor`（OpenAI 兼容接口）与释义兜底 `CloudGlossFiller`；`PredictConfig` 是 `[predict]` 分节。
+- `crates/qingjian-search`：搜索联想 `BingPredictor`（搜索建议接口，缺省 Bing，无需密钥），只发拼音字母；`SearchConfig` 是 `[search]` 分节。与云联想可同时开启，由 Core 的 `MultiPredictor` 合并。
 - `crates/qingjian-lm`：整句转换的 bigram 语言模型 `BigramModel`。
 - `crates/qingjian-neural`：字级 Transformer 本地推理 `CharScorer`（candle），给整句前几条路径重打分。
 - `crates/qingjian-format`：`.qj` 数据容器（mmap 读、零拷贝视图、写入器、哈希索引）。

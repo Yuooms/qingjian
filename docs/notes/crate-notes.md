@@ -53,6 +53,11 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
   纠正之间比较时换位减 `TypoCosts::correction_transpose_discount`（1 nat，CLI `--tune correction-transpose=`），与原样比不减；
   2026-09-15 回放 283 词 / 23 句：词首选 89.0%、整句 82.6%，与改前持平（折扣若也用在与原样比，`zhongwne` 会误纠成 中文，整句掉一条）。
 
+`prediction::MultiPredictor` 把多个联想源合起来当成一个 `Predictor`（`Engine` 只有一个 `predictor` 槽位，云联想与搜索联想要能同时开就得靠它）：
+请求同时下发，按序号攒成一批，**收齐或超过截止时间**后合并——按源顺序拼接词、按文本去重，前面的源占更靠前的格；
+某源 `slots = 0` 时它的词不进候选（只可能带整句），「只开整句补全」的配置在组合下依然成立。合并策略取观察窗口大者、条数上限求和、整句任一源要就给。
+截止时间是必需的兜底：某源的线程退出或 panic 时它永远不回结果，只靠「收齐」会一直等（壳按各源超时里最大的再加 1 秒传进来）。
+
 `EngineSession` 保存可挂起的组句、标点、历史与学习链，`Engine::swap_session` 在同一个引擎里交换输入状态，共用词库与落盘服务。切换上下文时清除查询及异步预测缓存，并由平台恢复各自私密状态。
 
 `Engine::raw_preedit()`（`engine/raw/`）只读返回 `RawPreedit { text, cursor_bytes }`：完整未上屏组合及 UTF-8 字节光标，与随后 `take_raw()` 共用文本生成，保留大小写、显式分隔符及光标后的剩余内容，不包含待处理辅码；不运行候选查询、不学习、不记日志、统计、历史或展示回报。
@@ -86,6 +91,7 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 ## crates/qingjian-predict
 
 - `CloudPredictor`：`Predictor` trait 的网络实现（async-openai，OpenAI 兼容接口，默认 DeepSeek），后台线程防抖 / 缓存 / 超时，`submit` / `poll` 非阻塞。
+  `new_reliable` 是「出错也回一条空结果」的变体，组合联想（`MultiPredictor`）里用它，好让这一批早点收齐；单独的云联想仍用 `new`（出错不回，等壳自己的超时）。
   `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
   前面的本地候选不挪；排布在 Core `CandidateLayout`）和整句补全（preedit 右侧，Tab）；上屏后不联想，本地历史不进请求。
   简拼（半数以上音节是缩写）的请求 `max_items = 0`，只求整句补全（`prediction::mostly_abbreviated`）：按声母凑出来的词大多是生造词，
@@ -95,6 +101,20 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
   （`user-glossary-<语言>.tsv`，`LayeredTranslator` 个人表优先）；随云联想开关一起开。
 - 问字键（缺省 `u`）开头是问字模式（`PredictionKind::Question`，答案带读音、不校验拼音），`?` 开头要 `ModeKeys::question_mark` 开着才算（配置 `[shortcut] question_mark`，缺省关，壳用 `Engine::takes_question_mark` 决定空缓冲区的 `?` 是入口还是标点）；`PredictionKind::Translate` 是壳里快捷键触发的「翻译选中文字」
   （双向：汉字为主译成学习语言，外文译回中文，`prediction::translation_target`），译文走结果的 `sentence`。
+
+## crates/qingjian-search
+
+- `BingPredictor`：`Predictor` trait 的第二个网络实现，接搜索建议接口（缺省 Bing `api.bing.com/osjson.aspx`，无需密钥；
+  响应是 OpenSearch Suggestions 的 `["query", ["词", …]]`，`parse` 只认这一种形状，HTML 错误页 / JSONP 包裹一律 `Malformed`）。
+  与 `CloudPredictor` 同一套骨架：后台线程（`worker`）、防抖（缺省 200 ms）、LRU 缓存（64 条，键 = 切分 + 市场，不含序号，空结果不进缓存）、超时丢结果、
+  `submit` / `poll` 只碰通道；**任何失败路径都回一条空结果**，组合联想（`MultiPredictor`）才能收齐、不让某源把整批拖到截止时间。
+- 只发拼音字母，不带上下文（`policy` 的观察窗口为 0、`sentence: false`），密码框里不发。
+- `wants()` 四条门槛：组句中、`request.max_items > 0`（简拼标记，Core 置 0）、字母数够 `min_letters`、
+  `parser::is_fully_segmentable`（简拼 `fhyq`、形码 `ggll`、末尾未打完的 `kaif` 都过不了这条）。
+- `filter::to_cloud_words`：建议词只留**整条都是汉字**、且字数等于音节数的，音节直接用用户敲的那次切分
+  （接口不给读音）——这样上屏能按音节消耗拼音、也能记成用户词，Core 的 `validate_cloud_words` 才认。
+- `[search] slots = 0` 表示不要词：`policy().max_items` 也置 0，`Worker` 一个请求都不发。
+- `SearchProbe`：设置页「测试联通」用，起线程查一次固定拼音（`zhongguo`），主线程轮询取结果，与 `qingjian-predict` 的 `ConnectionTest` 同型。
 
 ## crates/qingjian-format
 
@@ -174,8 +194,10 @@ P2C 自由生成实验：`--eval-text <集> --eval-generate data/models/hanzhang
 都还在读、文件不自动改写。
 
 
-`Config`（TOML 配置文件，`[general]` / `[shortcut]` / `[fuzzy]` / `[dictionaries]` / `[apps]` / `[predict]` 分节，首次运行写模板，
-`set_value` 用 toml_edit 原地改键保留注释；`[model] enabled` 本地整句模型开关，`LocalModelConfig`；
+`Config`（TOML 配置文件，`[general]` / `[shortcut]` / `[fuzzy]` / `[dictionaries]` / `[apps]` / `[predict]` / `[search]` 分节，首次运行写模板，
+`set_value` 用 toml_edit 原地改键保留注释，分节不存在时先建成标准表（否则会写成顶层行内表）；
+`[search]` 是搜索联想（直接复用 `qingjian-search::SearchConfig`，缺省关）——放平台上而不是各壳里，因为 macOS 壳与 Windows Server 都要读同一份；
+`[model] enabled` 本地整句模型开关，`LocalModelConfig`；
 中英模式两项：`[shortcut] switch_mode`（`SwitchKeys`：勾选 shift / control / ctrl+alt+space，可多选，老配置的单个字符串照读）与 `[general] english_mode`（内置英文模式总开关））；
 `extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`
 （mac 壳与 Windows Server 共用，同名 `.qj` 优先于 `.tsv`）；`code_tables` 同构地列出 / 加载随包根 `codes/` 与用户 `codes/` 的码表
@@ -263,6 +285,12 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 
 一个产品两个 package：`server`（Server 进程：IPC 分派 + Engine + 命名管道 + 自绘候选窗与悬浮状态条）与 `tsf`（TSF 文本服务 DLL，lib 名固定 `qingjian_tsf`），
 外加 `settings`（WinUI 3 设置程序，含「辅码」页）与 `installer`（Inno Setup）。
+联想数据源由 `dispatch/reload::attach_predictors` 一处装配（启动与热加载共用，配置里任一源变了就整体重装）：
+`[search]` 与 `[predict]` 都关就退回 `NoPredictor`，只开一个就用那一个，两个都开用 Core 的 `MultiPredictor` 合并
+（搜索在前——它与所敲拼音严格对齐，词库没有的词更该靠前）；截止时间取两边超时里最大的再加 1 秒。
+组合场景下云联想用 `CloudPredictor::new_reliable`（失败也回空结果），免得 Bing 先到时被云的超时拖到截止时间；
+释义兜底 `CloudGlossFiller` 只看 `[predict]`，不被搜索联想带开。设置程序「搜索联想」页在 `settings/src/panel/pages/search.rs`，
+「测试联通」走 `qingjian_search::SearchProbe`（状态类型 `ProbeStatus` 与「云服务」页共用）。
 Server 侧辅码接线：`RouterConfig.aux_code_key` / `aux_code_show`（`apply_config` 热加载）、`assembly` 从随包 `codes/` 与用户 `codes/` 装码表
 （`[aux_code] disabled` 过滤，`code_tables::load`）、按键在 `dispatch/key/input.rs` 分流（触发键进辅码态、辅码态里字母进码段、
 大写（`shift_letter = "compose"`）先清码段回拼音态再进缓冲区、标点先上屏高亮候选再转全角）、候选窗 `ui/candidates/row.rs` 的 `Row.code` 把码用方括号括起来紧跟在候选词后面（不进 annotation），拼音行 `view.rs` 给码段加下划线。

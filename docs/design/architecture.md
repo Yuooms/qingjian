@@ -42,6 +42,7 @@ qingjian/
 │   ├── qingjian-translate/     # 候选翻译 annotation
 │   ├── qingjian-learning/      # 用户词频、用户词、个人英文词、个人 n-gram、个人敲错表（user.tsv / user-words.tsv / user-english.tsv / user-ngram.tsv / user-typos.tsv）、输入日志（input-log.jsonl）、输入统计（usage.tsv）、词汇记录（user-vocab.tsv）
 │   ├── qingjian-predict/       # 云联想：Predictor 的网络实现（OpenAI 兼容接口）
+│   ├── qingjian-search/        # 搜索联想：Predictor 的第二个网络实现（搜索建议接口，补词库中没有的词）
 │   ├── qingjian-lm/            # 整句转换的 bigram 语言模型：LanguageModel 的实现
 │   ├── qingjian-neural/        # 字级 Transformer 的本地推理（candle）：SentenceScorer 的实现，给整句前几条路径重打分
 │   ├── qingjian-format/        # .qj 数据容器：mmap 打开、零拷贝视图、写入器、可落盘的哈希索引（dictionary / lm 依赖它）
@@ -144,9 +145,9 @@ qingjian-dictionary        （纯数据加载与查询，依赖 qingjian-format 
         ▲
 qingjian-core              （定义 Translator / Learner / Predictor trait，依赖 dictionary）
         ▲           ▲            ▲
-qingjian-translate  qingjian-learning  qingjian-predict  qingjian-lm  qingjian-neural   （实现 core 的 trait，依赖 core；learning 另依赖 translate 的 LevelTable 做词汇按级汇总）
+qingjian-translate  qingjian-learning  qingjian-predict  qingjian-search  qingjian-lm  qingjian-neural   （实现 core 的 trait，依赖 core；learning 另依赖 translate 的 LevelTable 做词汇按级汇总）
         ▲           ▲            ▲
-qingjian-platform          （配置文件 Config：general / shortcut / fuzzy / predict 分节，toml_edit 原地改键保留注释；协议类型，可序列化；依赖 core、predict）
+qingjian-platform          （配置文件 Config：general / shortcut / fuzzy / predict / search 分节，toml_edit 原地改键保留注释；协议类型，可序列化；依赖 core、predict、search）
         ▲
 apps/*                     （组装：Engine::new(dict).with_translator(..).with_learner(..).with_predictor(..)）
 ```
@@ -304,7 +305,9 @@ CC-CEDICT 表（`dict-convert cedict`）保留为备用来源，覆盖面广但�
   用户点选的转移记双份（`EXPLICIT_TRANSITION_WEIGHT`），整句路径里顺带的记一份：整句是模型自己算的，按空格接受会把它喂回模型形成回声，
   用户明确改选一次就要能压过去。选择次数在整句路径上的加分取对数并封顶（`viterbi::WEIGHT_CAP`），只管同音词偏好，不许它抬起拆分路径。
 - 联想通过 `Predictor` trait 注入，与翻译一样是异步补充：**不阻塞候选、不重排已有候选**，超时即丢。
-  网络实现放 `qingjian-predict`，Core 不依赖它，也永远不联网。
+  网络实现放独立 crate（`qingjian-predict` 云联想、`qingjian-search` 搜索联想），Core 不依赖它们，也永远不联网。
+  要同时接多个源时用 Core 的 `MultiPredictor` 把若干个 `Predictor` 合成一个（请求同时下发、按序号攒批，
+  收齐或超过截止时间后按源顺序拼接去重）。
   请求带 `reasoning_effort`（配置 `[predict] reasoning_effort`，缺省 `none`）：DeepSeek V4 这类默认思考的模型不关会把 token 预算花光、正文为空；
   密钥环境变量缺省 `QINGJIAN_API_KEY`（`api_key_env` 可改），名字跟产品不跟供应商，因为 `base_url` 本来就可以指到别家。
   接口是非阻塞的 `submit` / `poll`：网络 crate 自己开后台线程做防抖、缓存、超时；壳用定时器轮询结果；
