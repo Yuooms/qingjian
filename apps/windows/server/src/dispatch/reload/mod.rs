@@ -10,9 +10,12 @@ use qingjian_render::ThemeLibrary;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use qingjian_core::{Engine, Language, NoGlossFiller, NoPredictor, NoTranslator};
+use qingjian_core::{
+    Engine, Language, MultiPredictor, NoGlossFiller, NoPredictor, NoTranslator, Predictor,
+};
 use qingjian_platform::{Config, code_tables};
 use qingjian_predict::{CloudGlossFiller, CloudPredictor, PredictConfig};
+use qingjian_search::{BingPredictor, SearchConfig};
 
 pub(super) use self::state::ConfigReload;
 pub use self::state::DataDirs;
@@ -31,30 +34,43 @@ fn mtime(path: &Path) -> Option<SystemTime> {
         .ok()
 }
 
-/// 按 `[predict]` 接云联想与释义兜底；关着或缺密钥就退回本地实现。启动与热加载共用。
-pub fn attach_cloud(engine: &mut Engine, predict: &PredictConfig) {
-    if !predict.enabled {
-        tracing::info!("云联想未开启（[predict] enabled = false）");
+/// 按 `[predict]` / `[search]` 接联想数据源：都关着退回本地实现，只开一个就用那一个，
+/// 两个都开用 [`MultiPredictor`] 合并（搜索在前：它与输入拼音严格对齐，词库没有的词更靠前）。
+/// 释义兜底（[`CloudGlossFiller`]）只看 `[predict]`，与搜索联想无关。启动与热加载共用。
+pub fn attach_predictors(engine: &mut Engine, predict: &PredictConfig, search: &SearchConfig) {
+    let mut sources: Vec<Box<dyn Predictor>> = Vec::new();
+    if search.enabled {
+        match BingPredictor::new(search) {
+            Ok(predictor) => sources.push(Box::new(predictor)),
+            Err(error) => tracing::warn!(%error, "搜索联想接入失败，跳过"),
+        }
+    }
+    if predict.enabled {
+        // 组合场景下用「失败回空」的云联想：Bing 先到也不会被云的超时拖到截止时间
+        match CloudPredictor::new_reliable(predict) {
+            Ok(predictor) => sources.push(Box::new(predictor)),
+            Err(error) => tracing::warn!(%error, "云联想接入失败（缺 API key？），跳过"),
+        }
+    }
+    if sources.is_empty() {
+        tracing::info!("联想数据源未开启（[predict] / [search] 都关着或未就绪）");
         engine.set_predictor(Box::new(NoPredictor));
+    } else {
+        // 截止时间取各源超时里最大的再加一点余量：某源线程没了时靠它兜底
+        let deadline = Duration::from_millis(predict.timeout_ms.max(search.timeout_ms) + 1000);
+        engine.set_predictor(Box::new(MultiPredictor::new(sources, deadline)));
+    }
+    // 释义兜底只依赖 [predict]：搜索联想不需要它，也不该被它带开
+    if predict.enabled {
+        match CloudGlossFiller::new(predict) {
+            Ok(filler) => engine.set_gloss_filler(Box::new(filler)),
+            Err(error) => {
+                tracing::warn!(%error, "释义兜底未启用");
+                engine.set_gloss_filler(Box::new(NoGlossFiller));
+            }
+        }
+    } else {
         engine.set_gloss_filler(Box::new(NoGlossFiller));
-        return;
-    }
-    match CloudPredictor::new(predict) {
-        Ok(predictor) => {
-            engine.set_predictor(Box::new(predictor));
-            tracing::info!(model = %predict.model, "云联想已接入");
-        }
-        Err(error) => {
-            tracing::warn!(%error, "云联想接入失败（缺 API key？），退回本地候选");
-            engine.set_predictor(Box::new(NoPredictor));
-        }
-    }
-    match CloudGlossFiller::new(predict) {
-        Ok(filler) => engine.set_gloss_filler(Box::new(filler)),
-        Err(error) => {
-            tracing::warn!(%error, "释义兜底未启用");
-            engine.set_gloss_filler(Box::new(NoGlossFiller));
-        }
     }
 }
 
@@ -109,7 +125,7 @@ impl Router {
             .map(|reload| reload.config_path.as_path())
     }
 
-    /// 开启热加载：记下路径与当前已应用的 predict / dictionaries / aux_code / 学习语言，
+    /// 开启热加载：记下路径与当前已应用的 predict / search / dictionaries / aux_code / 学习语言，
     /// 以及启动用的那批数据目录。目录必须与启动同款语义（`dicts/` / `codes/`），
     /// 热加载才找得到文件。
     pub fn watch_config(
@@ -133,6 +149,7 @@ impl Router {
             code_files,
             last_mtime,
             applied_predict: config.predict.clone(),
+            applied_search: config.search.clone(),
             applied_dictionaries: config.dictionaries.clone(),
             applied_aux_code: config.aux_code.clone(),
             dictionary_files,
@@ -247,9 +264,12 @@ impl Router {
             return;
         };
         reload.update = config.update.clone();
-        if config.predict != reload.applied_predict {
-            attach_cloud(&mut self.engine, &config.predict);
+        // 两个联想数据源共用一个 MultiPredictor：任意一方变了就整体重装，
+        // 免得只换了一半（比如刚关掉搜索，云联想的「失败回空」语义要退回）。
+        if config.predict != reload.applied_predict || config.search != reload.applied_search {
+            attach_predictors(&mut self.engine, &config.predict, &config.search);
             reload.applied_predict = config.predict.clone();
+            reload.applied_search = config.search.clone();
         }
         let language = assembly::learning_language(config);
         if language != reload.applied_language

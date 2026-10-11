@@ -12,7 +12,7 @@ pub struct RouterConfig {
     /// 每页候选数（`[general] page_size`）。
     pub page_size: usize,
 
-    /// 云端候选在第一页预留的格数（`[predict] slots`）。
+    /// 云端候选在第一页预留的格数（`[predict] slots` 与 `[search] slots` 之和）。
     pub cloud_slots: usize,
 
     /// 中文模式下 Shift+字母收进组句缓冲区（`[general] shift_letter = "compose"`）。
@@ -129,7 +129,7 @@ impl From<&Config> for RouterConfig {
     fn from(config: &Config) -> Self {
         Self {
             page_size: config.general.page_size(),
-            cloud_slots: config.predict.slots,
+            cloud_slots: config.predict.slots + config.search.slots,
             shift_letter_compose: config.general.shift_letter.compose(),
             layout: config.general.layout,
             appearance: config.general.appearance(),

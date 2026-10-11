@@ -9,6 +9,7 @@ use qingjian_platform::{
     AuxCodeConfig, DictionariesConfig, UpdateConfig, code_tables, extra_dictionaries,
 };
 use qingjian_predict::PredictConfig;
+use qingjian_search::SearchConfig;
 
 /// 随包与用户数据目录：启动与热加载用的是同一批（词库、码表）。
 /// 分开传参数会越传越长，且热加载与原路径不一致时找不到文件。
@@ -71,6 +72,9 @@ pub(crate) struct ConfigReload {
 
     /// 已应用的 `[predict]`。
     pub(super) applied_predict: PredictConfig,
+
+    /// 已应用的 `[search]`（Bing 搜索联想）。
+    pub(super) applied_search: SearchConfig,
 
     /// 已应用的 `[dictionaries]`。
     pub(super) applied_dictionaries: DictionariesConfig,
